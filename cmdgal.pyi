@@ -87,7 +87,19 @@ class Page(object):
         speed: float = 2.0,
         set: int = 1,
     ) -> Page: ...
-    def show(self, father: Window, /, *args, **kwargs) -> None: ...
+    @overload
+    def __init__(
+        self,
+        style: str = "StartPage::Normal",
+        /,
+        title_page: str = "",
+        start_cg: str = "",
+        message: str = "",
+        choiceDict: dict = {},
+        title_setup: dict = {"type": "position", "x": 6, "y": 3},
+        choice_setup: dict = {"type": "side", "sidex": "right", "sidey": "middle"},
+    ) -> Page: ...
+    def show(self, father: Window, /, *args, **kwargs) -> Any: ...
 
 class Variable(object):
     def __init__(self, name: str) -> Variable: ...
@@ -112,19 +124,19 @@ class Select(object):
         /,
         minLength: int = 15,
         entering: str = "enter",
-        show_cursor: bool = False
+        show_cursor: bool = False,
     ) -> Select: ...
     def refresh(self) -> None: ...
     @overload
     def run(
-        self, father: Window, type: str = "position", /, x: int = 0, y: int = 0
+        self, father: Window, /, type: str = "position", x: int = 0, y: int = 0
     ) -> Any: ...
     @overload
     def run(
         self,
         father: Window,
-        type: str = "side",
         /,
+        type: str = "side",
         sidex: str = "right" | "left" | "center",
         sidey: str = "top" | "bottom" | "middle",
     ) -> Any: ...
