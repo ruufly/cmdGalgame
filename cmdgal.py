@@ -4,6 +4,8 @@ import json
 import time
 import msvcrt
 import ctypes
+import threading
+import builtins
 
 
 class NoBindTypeError(Exception): ...
@@ -12,7 +14,10 @@ class NoBindTypeError(Exception): ...
 class UnknownStyleError(Exception): ...
 
 
-lib = ctypes.WinDLL(os.path.join(os.path.dirname(os.path.abspath(__file__)),"window.dll"))
+lib = ctypes.WinDLL(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "window.dll")
+)
+
 
 def goto(x, y):
     lib.setcursor(x, y)
@@ -21,7 +26,7 @@ def goto(x, y):
 
 def fontSize(n):
     lib.setFontSizeMode(n)
-    os.system("fontsize %d" % n)
+    # os.system("fontsize %d" % n)
 
 
 def showCursor(visible):
@@ -68,8 +73,9 @@ class Window(object):
         self.height = settings["height"]
 
     def wait(self, timeout):
-        goto(0, 0)
         time.sleep(timeout / 1000)
+        goto(0, 0)
+        clear()
 
     # def maintain(self):
     #     def going(self):
@@ -105,9 +111,9 @@ class WidgetStatic(object):
         if sidex == "center":
             x = (father.width - self.width) // 2
         elif sidex == "right":
-            x = father.width - self.width
+            x = father.width - self.width - (1 if sidey == "bottom" else 0)
         elif sidex == "left":
-            x = 0
+            x = (1 if sidey == "bottom" else 0)
         if sidey == "middle":
             y = (father.height - self.height) // 2
         elif sidey == "bottom":
@@ -236,38 +242,12 @@ class Styles(object):
 styles = Styles()
 
 
-def InitialPage_Normal(
-    mainImage: str = "", noticeText: str = "", isFlow: bool = True, *args
+def SelectWidget_Normal(
+    choices: dict,
+    minLength: int = 15,
+    entering: str = "enter",
+    show_cursor: bool = False,
 ):
-    if isFlow:
-        return (
-            Image(mainImage),
-            (),
-            {"type": "side", "sidex": "center", "sidey": "middle"},
-            Label(noticeText),
-            (*args,),
-            {"type": "side", "sidex": "left", "sidey": "bottom"},
-        )
-    else:
-        return (
-            Image(mainImage),
-            (),
-            {"type": "side", "sidex": "center", "sidey": "middle"},
-            Image(noticeText),
-            (),
-            {"type": "side", "sidex": "left", "sidey": "bottom"},
-        )
-
-
-def InitialPage_Normal_Show(
-    father: Window, widgets: list | tuple = [], waitTime: int = 1000
-):
-    for i in widgets:
-        i[0].show(father, *i[1], **i[2])
-    father.wait(waitTime)
-
-
-def SelectWidget_Normal(choices: dict, minLength: int = 15, entering: str = "enter", show_cursor: bool = False):
     maxLength = -1
     for i in choices:
         if len(choices[i]) > maxLength:
@@ -284,31 +264,7 @@ def SelectWidget_Normal(choices: dict, minLength: int = 15, entering: str = "ent
     return showing, choiceDict, ">", True, entering, show_cursor
 
 
-styles.styles["InitialPage::Normal"] = InitialPage_Normal
-styles.styles["InitialPage::Normal::Show"] = InitialPage_Normal_Show
-
 styles.styles["SelectWidget::Normal"] = SelectWidget_Normal
-
-
-class Page(object):
-    def __init__(self, style, *args, **kwargs):
-        if not style in styles.styles:
-            raise UnknownStyleError("No such style: %s" % style)
-        self.style = style
-        paraList = styles.styles[style](*args, **kwargs)
-        self.init(*paraList)
-
-    def init(self, *args):
-        self.widgets = []
-        if len(args) % 3:
-            raise ValueError("Args must be in pairs: widget, arguments")
-        for i in range(0, len(args), 3):
-            self.widgets.append((args[i], args[i + 1], args[i + 2]))
-
-    def show(self, father, *args, **kwargs):
-        if not "%s::Show" % self.style in styles.styles:
-            raise UnknownStyleError("The style %s cannot be shown" % self.style)
-        styles.styles["%s::Show" % self.style](father, self.widgets, *args, **kwargs)
 
 
 class Select(WidgetStatic):
@@ -340,7 +296,7 @@ class Select(WidgetStatic):
             self.cursor,
             self.move,
             self.okay,
-            self.show_cursor
+            self.show_cursor,
         ) = styles.styles[style](
             choices=self.choices, *args, **kwargs
         )  # self.move: move by "W&S/Up&Down" if True else by "A&D/Left&Right"
@@ -391,7 +347,7 @@ class Select(WidgetStatic):
         goto(*self.cursor_at)
         self.cursor_lst = self.cursor_at
 
-    def run(self, father: Window, type: str = "position", /, *args, **kwargs):
+    def run(self, father: Window, /, type: str = "position", *args, **kwargs):
         self.running = True
         showCursor(self.show_cursor)
         self.x, self.y = self._bind(father, type, *args, **kwargs)
@@ -404,7 +360,7 @@ class Select(WidgetStatic):
             if msvcrt.kbhit():
                 char = msvcrt.getch()
                 if self.okay == "enter":
-                    if char == b'\r' or char == b'\n':
+                    if char == b"\r" or char == b"\n":
                         break
                 else:
                     if char == self.okay:
@@ -414,6 +370,130 @@ class Select(WidgetStatic):
         sys.stdin.flush()
         showCursor(True)
         return self.now_at
+
+
+def InitialPage_Normal(
+    mainImage: str = "", noticeText: str = "", isFlow: bool = True, *args
+):
+    if isFlow:
+        return (
+            Image(mainImage),
+            (),
+            {"type": "side", "sidex": "center", "sidey": "middle"},
+            Label(noticeText),
+            (*args,),
+            {"type": "side", "sidex": "left", "sidey": "bottom"},
+        )
+    else:
+        return (
+            Image(mainImage),
+            (),
+            {"type": "side", "sidex": "center", "sidey": "middle"},
+            Image(noticeText),
+            (),
+            {"type": "side", "sidex": "left", "sidey": "bottom"},
+        )
+
+
+def InitialPage_Normal_Show(
+    father: Window,
+    widgets: list | tuple = [],
+    waitTime: int = 1000,
+    runfunc: Any = lambda: ...,
+):
+    for i in widgets:
+        i[0].show(father, *i[1], **i[2])
+    runfunc()
+    father.wait(waitTime)
+
+
+styles.styles["InitialPage::Normal"] = InitialPage_Normal
+styles.styles["InitialPage::Normal::Show"] = InitialPage_Normal_Show
+
+
+def StartPage_Normal(
+    title_page: str = "",
+    start_cg: str = "",
+    message: str = "",
+    choiceDict: dict = {},
+    title_setup: dict = {"type": "position", "x": 6, "y": 3},
+    choice_setup: dict = {"type": "side", "sidex": "right", "sidey": "middle"},
+):
+    return (
+        Image(start_cg),
+        (),
+        {"type": "position", "x": 0, "y": 0},
+        Image(title_page),
+        (),
+        title_setup,
+        Image(message),
+        (),
+        {"type": "side", "sidex": "right", "sidey": "bottom"},
+        Select(choiceDict, "SelectWidget::Normal"),
+        (),
+        choice_setup,
+    )
+
+
+def StartPage_Normal_Show(father: Window, widgets: list | tuple = []):
+    for i in widgets[:-1]:
+        i[0].show(father, *i[1], **i[2])
+    ri = widgets[-1]
+    return ri[0].run(father, *ri[1], **ri[2])
+
+
+styles.styles["StartPage::Normal"] = StartPage_Normal
+styles.styles["StartPage::Normal::Show"] = StartPage_Normal_Show
+
+
+class Page(object):
+    def __init__(self, style, *args, **kwargs):
+        if not style in styles.styles:
+            raise UnknownStyleError("No such style: %s" % style)
+        self.style = style
+        paraList = styles.styles[style](*args, **kwargs)
+        self.init(*paraList)
+
+    def init(self, *args):
+        self.widgets = []
+        if len(args) % 3:
+            raise ValueError("Args must be in pairs: widget, arguments")
+        for i in range(0, len(args), 3):
+            self.widgets.append((args[i], args[i + 1], args[i + 2]))
+
+    def show(self, father, *args, **kwargs):
+        if not "%s::Show" % self.style in styles.styles:
+            raise UnknownStyleError("The style %s cannot be shown" % self.style)
+        return styles.styles["%s::Show" % self.style](
+            father, self.widgets, *args, **kwargs
+        )
+
+
+class Plugin(object):
+    def __init__(self, directory: str, *args, **kwargs):
+        self.directory = directory
+        with open(os.path.join(self.directory, "setup.json"), "r") as f:
+            self.setup = json.load(f)
+        self.name = self.setup["name"]
+        self.version = self.setup["version"]
+        self.author = self.setup["author"]
+        self.description = self.setup["description"]
+        self.import_ = self.setup["import"]
+        exec("import %s" % self.import_)
+        exec(
+            """for i in %s.styles:
+    styles.styles[i] = %s.styles[i]"""
+            % (self.import_, self.import_)
+        )
+        exec(
+            """for i in dir(%s):
+    if not hasattr(self, i):
+        setattr(self,i,eval("%s."+i))"""
+            % (self.import_, self.import_)
+        )
+
+    def __repr__(self):
+        return "<Plugin %s: %s at %s>" % (self.name, self.version, hex(id(self)))
 
 
 if __name__ == "__main__":
