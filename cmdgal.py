@@ -6,6 +6,8 @@ import msvcrt
 import ctypes
 import threading
 import builtins
+import copy
+import unicodedata
 
 
 class NoBindTypeError(Exception): ...
@@ -17,6 +19,8 @@ class UnknownStyleError(Exception): ...
 lib = ctypes.WinDLL(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "window.dll")
 )
+
+nowCursor = True
 
 
 def goto(x, y):
@@ -30,6 +34,8 @@ def fontSize(n):
 
 
 def showCursor(visible):
+    global nowCursor
+    nowCursor = visible
     lib.showcursor(visible)
     # os.system("showcursor %d" % (int(visible)))
 
@@ -45,6 +51,17 @@ def setWindow(width, height):
 def output(*string):
     # sys.stdout.write(*string,)
     print(*string, end="", flush=True)
+
+
+def isFullWidth(char):
+    return unicodedata.east_asian_width(char) in ("F", "W")
+
+
+def _len(str: str):
+    len = 0
+    for i in str:
+        len += 2 if isFullWidth(i) else 1
+    return len
 
 
 class Settings(object):
@@ -74,8 +91,6 @@ class Window(object):
 
     def wait(self, timeout):
         time.sleep(timeout / 1000)
-        goto(0, 0)
-        clear()
 
     # def maintain(self):
     #     def going(self):
@@ -100,20 +115,24 @@ class WidgetStatic(object):
             output(self.page[i - y][: min(self.width, father.width - x)])
         return x, y
 
-    def _show_position(self, father: Window, speed: float, set: int, x=0, y=0):
+    def _show_position(self, father: Window, speed: float, x=0, y=0):
         for i in range(y, min(father.height, y + self.height)):
-            for j in range(x, min(father.width, x + self.width), set):
-                goto(j, i)
-                output(self.page[i - y][j - x : min(self.width - 1, j - x + set)])
+            goto(x, i)
+            for j in range(x, min(father.width, x + self.width - 1)):
+                try:
+                    output(self.page[i - y][j - x])
+                except IndexError:
+                    pass
+                # output(self.page[i - y][j - x : min(self.width - 1, j - x + 1)])
                 time.sleep(speed / 1000)
 
     def __get_side(self, father: Window, sidex, sidey):
         if sidex == "center":
             x = (father.width - self.width) // 2
         elif sidex == "right":
-            x = father.width - self.width - (1 if sidey == "bottom" else 0)
+            x = father.width - self.width  # - (1 if sidey == "bottom" else 0)
         elif sidex == "left":
-            x = (1 if sidey == "bottom" else 0)
+            x = 0  # 1 if sidey == "bottom" else 0
         if sidey == "middle":
             y = (father.height - self.height) // 2
         elif sidey == "bottom":
@@ -125,8 +144,8 @@ class WidgetStatic(object):
     def _bind_side(self, father: Window, sidex, sidey):
         return self._bind_position(father, *self.__get_side(father, sidex, sidey))
 
-    def _show_side(self, father: Window, sidex, sidey, speed: float, set: int):
-        self._show_position(father, speed, set, *self.__get_side(father, sidex, sidey))
+    def _show_side(self, father: Window, sidex, sidey, speed: float):
+        self._show_position(father, speed, *self.__get_side(father, sidex, sidey))
 
     def _bind(self, father: Window, type="position", *args, **kwargs):
         try:
@@ -138,15 +157,12 @@ class WidgetStatic(object):
         self,
         father: Window,
         speed: float,
-        set: int = 1,
         type="position",
         *args,
         **kwargs,
     ):
         try:
-            getattr(self, "_show_%s" % type)(
-                father, *args, **kwargs, speed=speed, set=set
-            )
+            getattr(self, "_show_%s" % type)(father, *args, **kwargs, speed=speed)
         except AttributeError:
             raise NoBindTypeError("No such showing type: %s" % type)
 
@@ -155,7 +171,9 @@ class Image(WidgetStatic):
     def __init__(self, image, **kwargs):
         super(Image, self).__init__(**kwargs)
         self.page = image.splitlines()
-        self.width = len(self.page[0])
+        self.width = 0
+        for i in self.page:
+            self.width = max(self.width, _len(i))
         self.height = len(self.page)
 
     def show(self, father: Window, type="position", *args, **kwargs):
@@ -166,7 +184,9 @@ class Label(WidgetStatic):
     def __init__(self, text, **kwargs):
         super(Label, self).__init__(**kwargs)
         self.page = text.splitlines()
-        self.width = len(self.page[0])
+        self.width = 0
+        for i in self.page:
+            self.width = max(self.width, _len(i))
         self.height = len(self.page)
 
     def show(
@@ -174,11 +194,10 @@ class Label(WidgetStatic):
         father: Window,
         type="position",
         speed: float = 2.0,
-        set: int = 1,
         *args,
         **kwargs,
     ):
-        self._show(father, speed, set, type, *args, **kwargs)
+        self._show(father, speed, type, *args, **kwargs)
 
 
 class Variables(object):
@@ -234,6 +253,26 @@ class Variable(object):
         return bool(self.get())
 
 
+class BoxStyle(object):
+    def __init__(
+        self,
+        corner: str,
+        sideEdge: str,
+        topEdge: str,
+        splitEdge: str,
+        cursor: str,
+        leftDiagonal: str,
+        rightDiagonal: str,
+    ):
+        self.corner = corner
+        self.sideEdge = sideEdge
+        self.topEdge = topEdge
+        self.splitEdge = splitEdge
+        self.cursor = cursor
+        self.leftDiagonal = leftDiagonal
+        self.rightDiagonal = rightDiagonal
+
+
 class Styles(object):
     def __init__(self):
         self.styles = {}
@@ -241,27 +280,44 @@ class Styles(object):
 
 styles = Styles()
 
+styles.styles["Box::Normal"] = BoxStyle("+", "|", "=", "-", ">", "/", "\\")
+
 
 def SelectWidget_Normal(
     choices: dict,
     minLength: int = 15,
     entering: str = "enter",
     show_cursor: bool = False,
+    boxStyle: str = "Box::Normal",
 ):
+    try:
+        boxStyle = styles.styles[boxStyle]
+    except KeyError:
+        raise UnknownStyleError("No such box style: %s" % boxStyle)
+    corner = boxStyle.corner
+    sideEdge = boxStyle.sideEdge
+    topEdge = boxStyle.topEdge
+    cursor = boxStyle.cursor
     maxLength = -1
     for i in choices:
         if len(choices[i]) > maxLength:
             maxLength = len(choices[i])
     length = max(maxLength + 4, minLength)
     choiceDict = {}
-    showing = "*" * length + "\n"
+    showing = corner + topEdge * (length - 2) + corner + "\n"
     cnt = 1
     for i in choices:
-        showing += "* %s" % (choices[i]) + " " * (length - len(choices[i]) - 3) + "*\n"
+        showing += (
+            sideEdge
+            + " %s" % (choices[i])
+            + " " * (length - _len(choices[i]) - 3)
+            + sideEdge
+            + "\n"
+        )
         choiceDict[i] = (1, cnt)
         cnt += 1
-    showing += "*" * length
-    return showing, choiceDict, ">", True, entering, show_cursor
+    showing += corner + topEdge * (length - 2) + corner
+    return showing, choiceDict, cursor, True, entering, show_cursor
 
 
 styles.styles["SelectWidget::Normal"] = SelectWidget_Normal
@@ -302,7 +358,9 @@ class Select(WidgetStatic):
         )  # self.move: move by "W&S/Up&Down" if True else by "A&D/Left&Right"
         self.page = self.showing.splitlines()
         self.height = len(self.page)
-        self.width = len(self.page[0])
+        self.width = 0
+        for i in self.page:
+            self.width = max(self.width, _len(i))
 
     def refresh(self):
         self.__refresh(self.style, *self.__args, **self.__kwargs)
@@ -349,6 +407,7 @@ class Select(WidgetStatic):
 
     def run(self, father: Window, /, type: str = "position", *args, **kwargs):
         self.running = True
+        lstCursor = nowCursor
         showCursor(self.show_cursor)
         self.x, self.y = self._bind(father, type, *args, **kwargs)
         self.cursor_lst = (None, None)
@@ -368,7 +427,7 @@ class Select(WidgetStatic):
                 self.__changeKey(char)
         self.running = False
         sys.stdin.flush()
-        showCursor(True)
+        showCursor(lstCursor)
         return self.now_at
 
 
@@ -403,8 +462,12 @@ def InitialPage_Normal_Show(
 ):
     for i in widgets:
         i[0].show(father, *i[1], **i[2])
-    runfunc()
-    father.wait(waitTime)
+    startRun = threading.Thread(target=runfunc)
+    waitRun = threading.Thread(target=father.wait, args=(waitTime,))
+    startRun.start()
+    waitRun.start()
+    while startRun.is_alive() or waitRun.is_alive():
+        ...
 
 
 styles.styles["InitialPage::Normal"] = InitialPage_Normal
@@ -446,6 +509,117 @@ styles.styles["StartPage::Normal"] = StartPage_Normal
 styles.styles["StartPage::Normal::Show"] = StartPage_Normal_Show
 
 
+def StoryPage_Normal(
+    fatherSetting: Settings,
+    section: str = " ",
+    state: str = " ",
+    person: str = " ",
+    word: str = " ",
+    boxStyle: str = "Box::Normal",
+    boxMinLength: int = 40,
+    nameMinLength: int = 18,
+    messageboxHeight: int = 8,
+    speed: float = 2.0,
+):
+    setting = fatherSetting.settings
+    section_len = 0
+    for i in section:
+        section_len += 2 if isFullWidth(i) else 1
+    state_len = 0
+    for i in state:
+        state_len += 2 if isFullWidth(i) else 1
+    person_len = 0
+    for i in person:
+        person_len += 2 if isFullWidth(i) else 1
+    topBox_length = min(
+        max(max(section_len, state_len) + 8, boxMinLength), setting["width"]
+    )
+    try:
+        boxStyle = styles.styles[boxStyle]
+    except KeyError:
+        raise UnknownStyleError("No such box style: %s" % boxStyle)
+    topBox = (
+        boxStyle.corner
+        + boxStyle.topEdge * (topBox_length - 2)
+        + boxStyle.corner
+        + "\n"
+        + boxStyle.sideEdge
+        + " "
+        + section
+        + " " * (topBox_length - section_len - 3)
+        + boxStyle.sideEdge
+        + "\n"
+        + boxStyle.sideEdge
+        + "    "
+        + state
+        + " " * (topBox_length - state_len - 6)
+        + boxStyle.sideEdge
+        + "\n"
+        + boxStyle.corner
+        + boxStyle.topEdge * (topBox_length - 2)
+        + boxStyle.corner
+    )
+    reMessagebox = boxStyle.topEdge * setting["width"]
+    messagebox_length = max(nameMinLength, person_len + 2)
+    messagebox = (
+        "     "
+        + boxStyle.corner
+        + boxStyle.splitEdge * messagebox_length
+        + boxStyle.corner
+        + "\n"
+        + "     "
+        + boxStyle.sideEdge
+        + " "
+        + person
+        + " " * (messagebox_length - person_len)
+        + boxStyle.rightDiagonal
+        + "\n"
+        + boxStyle.topEdge * 5
+        + boxStyle.corner
+        + " " * (messagebox_length + 2)
+        + boxStyle.corner
+    )
+    return (
+        Image(topBox),
+        (),
+        {"type": "position", "x": 1, "y": 1},
+        Image(reMessagebox),
+        (),
+        {"type": "position", "x": 0, "y": setting["height"] - messageboxHeight},
+        Image(messagebox),
+        (),
+        {"type": "position", "x": 0, "y": setting["height"] - messageboxHeight - 2},
+        Image(person),
+        (),
+        {"type": "position", "x": 7, "y": setting["height"] - messageboxHeight - 1},
+        Label(word),
+        (),
+        {
+            "type": "position",
+            "speed": speed,
+            "x": 7,
+            "y": setting["height"] - messageboxHeight + 2,
+        },
+    )
+
+
+def StoryPage_Normal_Show(father: Window, widgets: list | tuple = []):
+    for i in widgets:
+        i[0].show(father, *i[1], **i[2])
+    while True:
+        if msvcrt.kbhit():
+            char = msvcrt.getch()
+            if char == b"\r" or char == b"\n" or char == b" ":
+                return True
+            elif char == b"\x1b":
+                return False
+    # time.sleep(10)
+
+
+styles.styles["StoryPage::Normal"] = StoryPage_Normal
+styles.styles["StoryPage::Normal::Show"] = StoryPage_Normal_Show
+
+
 class Page(object):
     def __init__(self, style, *args, **kwargs):
         if not style in styles.styles:
@@ -461,16 +635,40 @@ class Page(object):
         for i in range(0, len(args), 3):
             self.widgets.append((args[i], args[i + 1], args[i + 2]))
 
-    def show(self, father, *args, **kwargs):
+    def show(self, father, isClear: bool = True, *args, **kwargs):
         if not "%s::Show" % self.style in styles.styles:
             raise UnknownStyleError("The style %s cannot be shown" % self.style)
-        return styles.styles["%s::Show" % self.style](
+        ret = styles.styles["%s::Show" % self.style](
             father, self.widgets, *args, **kwargs
         )
+        if isClear:
+            clear()
+        return ret
+
+
+class PluginUse(object):
+    def __init__(self):
+        self.goto = goto
+        self.fontSize = fontSize
+        self.showCursor = showCursor
+        self.clear = clear
+        self.Settings = Settings
+        self.Window = Window
+        self.WidgetStatic = WidgetStatic
+        self.Image = Image
+        self.Label = Label
+        self.Styles = Styles
+        self.Page = Page
+        self.Variable = Variable
+        self.Variables = Variables
+        self.Select = Select
+
+
+PluginUse = PluginUse()
 
 
 class Plugin(object):
-    def __init__(self, directory: str, *args, **kwargs):
+    def __init__(self, directory: str, /, *args, **kwargs):
         self.directory = directory
         with open(os.path.join(self.directory, "setup.json"), "r") as f:
             self.setup = json.load(f)
@@ -479,16 +677,27 @@ class Plugin(object):
         self.author = self.setup["author"]
         self.description = self.setup["description"]
         self.import_ = self.setup["import"]
+        print(
+            "loading plugin... %s: %s by %s from %s"
+            % (self.name, self.version, self.author, self.import_)
+        )
         exec("import %s" % self.import_)
         exec(
-            """for i in %s.styles:
-    styles.styles[i] = %s.styles[i]"""
-            % (self.import_, self.import_)
+            """if hasattr(%s, "styles"):
+    for i in %s.styles:
+        styles.styles[i] = %s.styles[i]"""
+            % (self.import_, self.import_, self.import_)
         )
+        exec("%s.api = [PluginUse, variables, styles.styles]" % self.import_)
         exec(
             """for i in dir(%s):
     if not hasattr(self, i):
-        setattr(self,i,eval("%s."+i))"""
+        func = eval("%s." + str(i))
+        if type(func) == type(lambda: ...):
+            # self.funcS[i] = func
+            # lastFunc = lambda *args, **kwargs: self.funcS[i](api=[PluginUse, variables, styles.styles], *args, **kwargs)
+            setattr(self, i, func)
+            # lastFunc()"""
             % (self.import_, self.import_)
         )
 
