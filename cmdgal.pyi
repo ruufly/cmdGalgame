@@ -56,7 +56,6 @@ class Label(WidgetStatic):
         type: str = "position",
         /,
         speed: float = 2.0,
-        set: int = 1,
         x: int = 0,
         y: int = 0,
     ) -> None: ...
@@ -67,7 +66,6 @@ class Label(WidgetStatic):
         type: str = "side",
         /,
         speed: float = 2.0,
-        set: int = 1,
         sidex: str = "right" | "left" | "center",
         sidey: str = "top" | "bottom" | "middle",
     ) -> None: ...
@@ -85,7 +83,6 @@ class Page(object):
         noticeText: str = "",
         isFlow: bool = True,
         speed: float = 2.0,
-        set: int = 1,
     ) -> Page: ...
     @overload
     def __init__(
@@ -115,6 +112,18 @@ class Variables(object):
 
 variables = Variables()
 
+class BoxStyle(object):
+    def __init__(
+        self,
+        corner: str,
+        sideEdge: str,
+        topEdge: str,
+        splitEdge: str,
+        cursor: str,
+        leftDiagonal: str,
+        rightDiagonal: str,
+    ) -> BoxStyle: ...
+
 class Select(object):
     @overload
     def __init__(
@@ -125,6 +134,7 @@ class Select(object):
         minLength: int = 15,
         entering: str = "enter",
         show_cursor: bool = False,
+        boxStyle: str = "Box::Normal",
     ) -> Select: ...
     def refresh(self) -> None: ...
     @overload
@@ -140,3 +150,6 @@ class Select(object):
         sidex: str = "right" | "left" | "center",
         sidey: str = "top" | "bottom" | "middle",
     ) -> Any: ...
+
+class Plugin(object):
+    def __init__(self, directory: str, /, *args, **kwargs) -> Plugin: ...
