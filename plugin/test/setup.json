@@ -1,0 +1,7 @@
+{
+    "name": "test",
+    "version": "v1.0.0",
+    "author": "distjr_",
+    "description": "Test plugin for my app",
+    "import": "plugin.test"
+}
