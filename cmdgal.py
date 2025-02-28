@@ -603,8 +603,14 @@ def StoryPage_Normal(
     )
 
 
-def StoryPage_Normal_Show(father: Window, widgets: list | tuple = []):
+def StoryPage_Normal_Show(
+    father: Window, widgets: list | tuple = [], isAgain: bool = False
+):
     for i in widgets:
+        i = list(i)
+        if isAgain and type(i[0]) == Label:
+            i[0] = Image("\n".join(list(i[0].page)))
+            del i[2]["speed"]
         i[0].show(father, *i[1], **i[2])
     while True:
         if msvcrt.kbhit():
